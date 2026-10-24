@@ -317,7 +317,7 @@ function App() {
 }
 
 function FaceAuraLogo({ large = false }: { large?: boolean }) {
-  return <span className={large ? 'brand-symbol large' : 'brand-symbol'} aria-hidden="true"><svg viewBox="0 0 48 48" role="img"><path className="aura-ring" d="M9.8 31.1C6.9 22.4 11.2 13 19.7 9.6c7.3-2.9 15.6-.1 19.5 6.7" /><path className="face-line" d="M28.8 12.2c-5.5 1.4-9.4 6.3-9.4 12.1 0 5.4 3.2 10.1 7.9 12.3m4.3-23.8c4.1 2.3 6.5 6.7 6.2 11.3-.3 4.5-2.5 8.3-5.9 10.4M29 16.8c-2.3 1.5-3.6 4.1-3.5 6.8l3.2 2.5-2.6 2.1c1.1 2.2 3.3 3.6 5.8 3.7" /><path className="aura-spark" d="M12.8 12.5c.3 1.8 1.2 2.7 2.9 3.1-1.7.4-2.6 1.4-2.9 3.1-.3-1.7-1.2-2.7-2.9-3.1 1.7-.4 2.6-1.3 2.9-3.1Z" /><circle className="aura-dot" cx="10.6" cy="34.4" r="1.35" /></svg></span>
+  return <span className={large ? 'brand-symbol large' : 'brand-symbol'} aria-hidden="true"><svg viewBox="0 0 48 48" role="img"><path className="aura-ring" d="M7.8 32.3C4.7 22.4 9.7 11.7 19.5 7.9c8-3.1 17.2-.1 21.4 7.4" /><path className="face-line" d="M29.3 9.6c-6.1 1.5-10.4 6.9-10.4 13.4 0 6 3.6 11.2 8.8 13.6m4.8-26.3c4.5 2.6 7.2 7.4 6.8 12.5-.3 5-2.8 9.2-6.5 11.5M29.5 14.8c-2.5 1.7-4 4.6-3.8 7.5l3.5 2.8-2.9 2.3c1.2 2.4 3.7 4 6.4 4.1" /><path className="aura-spark" d="M11.1 9.7c.4 2 1.4 3 3.3 3.4-1.9.4-2.9 1.5-3.3 3.4-.4-1.9-1.4-3-3.3-3.4 1.9-.4 2.9-1.4 3.3-3.4Z" /><circle className="aura-dot" cx="8.8" cy="36" r="1.45" /></svg></span>
 }
 
 function Header({ page, setPage, mobileNav, setMobileNav }: { page: Page; setPage: (page: Page) => void; mobileNav: boolean; setMobileNav: (v: boolean) => void }) {
