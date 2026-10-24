@@ -2,9 +2,36 @@
 
 Face Aura is a private, gender-inclusive skincare companion built for Hacktoberfest 2026. It turns a clear face photo into an explainable cosmetic skin snapshot, a short AM/PM routine, ingredient-led product guidance, progress tracking, salon appointment requests, and an optional natural voice conversation.
 
+- **Live demo:** [monkfish-app-dt6vy.ondigitalocean.app](https://monkfish-app-dt6vy.ondigitalocean.app/)
+- **Source:** [github.com/pherbcampton/face-aura](https://github.com/pherbcampton/face-aura)
+
 Recommendations respond to visible cosmetic signals and user-selected goals—not gender identity, presentation, age, ethnicity, or attractiveness.
 
 > Face Aura is a cosmetic wellness application, not a medical device. It does not diagnose skin conditions and should not replace advice from a qualified clinician.
+
+## How Face Aura works
+
+1. **Sign in or explore privately.** Google sign-in creates a Supabase session for cross-device syncing. Guests can still explore, with their data kept in that browser.
+2. **Capture or upload a photo.** The responsive scanner supports a device camera and image upload, with lighting and framing guidance.
+3. **Prepare the image in the browser.** Face Aura corrects orientation, resizes the photo and converts it to an efficient JPEG before sending it for analysis.
+4. **Run the protected AI analysis.** The Express API validates the user session in production, then sends the image and selected goals to the configured Gemma 4 vision model through Ollama Cloud or a local Ollama server.
+5. **Return an explainable wellness result.** Gemma provides a likely cosmetic skin profile, visible concerns, confidence, a concise AM/PM routine, ingredient-led suggestions and conservative safety guidance. The server validates and normalises the structured response before the UI displays it.
+6. **Listen and ask follow-up questions.** ElevenLabs reads a short personal summary and opens a natural voice conversation. The face photo is never sent to ElevenLabs.
+7. **Build consistency.** Routine ticks are saved per calendar day. Signed-in users sync them to an owner-only Supabase row; signed-out users receive an immediate device-local fallback. AM and PM progress survives refreshes and later sessions.
+8. **Track progress.** Users can save cosmetic check-ins for blemish visibility, dark-spot visibility and hydration, then review the trend chart over time.
+9. **Request expert support.** The current salon experience stores a preferred example time only. It does not claim real-time availability, reserve a slot or take payment.
+
+```text
+Camera / upload
+      ↓
+React image preparation
+      ↓
+Authenticated Express API
+      ↓
+Gemma 4 via Ollama ──→ structured skin snapshot and routine
+      ↓                              ↓
+ElevenLabs conversation       Supabase private sync
+```
 
 ## Architecture
 
@@ -20,6 +47,7 @@ Face images are passed to the configured Gemma endpoint for the current request 
 
 - Google OAuth login and account profile
 - Personal result and progress sync across devices
+- Per-day AM/PM routine completion that survives reloads and syncs across signed-in sessions
 - Photo capture guidance, type validation and a 10 MB limit
 - Structured Gemma 4 result with confidence and conservative safety language
 - Personal AM/PM routine and ingredient-led product suggestions
@@ -29,6 +57,18 @@ Face images are passed to the configured Gemma endpoint for the current request 
 - Saved salon time preferences with explicit non-live availability labelling
 - ElevenLabs voice readout and follow-up conversation using a server-generated signed URL
 - Local fallback mode so judges can explore the interface without model credentials
+
+## What is stored
+
+| Data | Signed-in user | Guest | Notes |
+| --- | --- | --- | --- |
+| Structured skin analysis | Supabase | Browser storage | The original face image is not stored by Face Aura |
+| Daily AM/PM routine ticks | Supabase + device safety cache | Browser storage | One owner-only record per user and calendar day |
+| Progress check-ins | Supabase | Browser storage | Cosmetic self-tracking values only |
+| Appointment preferences | Supabase | Not saved | A request record, not a confirmed booking |
+| Reminder preferences | Browser storage | Browser storage | Browser notifications work only while the app is open |
+
+Every public-schema table containing personal data has Row Level Security enabled. Policies compare `auth.uid()` with the row owner, and the browser receives only the Supabase publishable key—never a secret or service-role key.
 
 ## What is needed for a fully live release
 
@@ -43,7 +83,7 @@ Face images are passed to the configured Gemma endpoint for the current request 
 
 ## Run locally
 
-Requirements: Node.js 20+, npm, [Ollama](https://ollama.com/), and the Supabase CLI for database setup.
+Requirements: Node.js 22, npm, [Ollama](https://ollama.com/) for local inference, and the Supabase CLI for database setup.
 
 ```bash
 ollama pull gemma4:e4b
@@ -116,6 +156,8 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
+The migrations create owner-only tables for profiles, analyses, progress entries, daily routine completion and appointment preferences. Run `supabase db push` again whenever a new migration is pulled from the repository.
+
 3. Copy the project URL and publishable key into both client and server variables in `.env`:
 
 ```dotenv
@@ -159,7 +201,7 @@ Never put a Google client secret, Supabase secret/service-role key, or ElevenLab
 - Model and hosted-service dependencies are documented.
 - The interface labels whether a result came from Gemma 4 or the illustrative fallback.
 - No Agent Skill is being submitted, so Agent Skills open-standard packaging is not applicable.
-- Before submission, publish this folder in a **public GitHub repository** and add the final repository and live demo URLs to the event entry.
+- The source is published in a **public GitHub repository**, and both the repository and live DigitalOcean demo are linked at the top of this README.
 
 ## Project structure
 

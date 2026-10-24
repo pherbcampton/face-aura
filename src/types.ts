@@ -12,6 +12,16 @@ export type RoutineStep = {
   ingredient?: string
 }
 
+export type DailyRoutineCompletion = {
+  morning: string[]
+  evening: string[]
+}
+
+export type DailyRoutineRecord = {
+  completion: DailyRoutineCompletion
+  updatedAt: string | null
+}
+
 export type Product = {
   category: string
   name: string

@@ -31,9 +31,9 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import type { ProgressEntry, SkinAnalysis } from './types'
+import type { DailyRoutineCompletion, ProgressEntry, RoutineStep, SkinAnalysis } from './types'
 import { useAuth } from './AuthContext'
-import { loadLatestAnalysis, loadProgress, saveAnalysis as saveCloudAnalysis, saveBooking, saveProgress } from './data'
+import { loadDailyRoutine, loadLatestAnalysis, loadProgress, saveAnalysis as saveCloudAnalysis, saveBooking, saveDailyRoutine, saveProgress } from './data'
 
 type Page = 'home' | 'scan' | 'results' | 'routine' | 'progress' | 'experts'
 type VoiceIntent = 'conversation' | 'results'
@@ -49,6 +49,7 @@ type ReminderPreferences = {
 
 const ANALYSIS_STORAGE_KEY = 'face-aura:v1:analysis'
 const PROGRESS_STORAGE_KEY = 'face-aura:v1:progress'
+const ROUTINE_STORAGE_KEY = 'face-aura:v1:daily-routines'
 const REMINDER_STORAGE_KEY = 'face-aura:v1:reminders'
 const REMINDER_SENT_KEY = 'face-aura:v1:reminder-sent'
 const LazyVoiceCompanion = lazy(() => import('./VoiceCompanion'))
@@ -112,6 +113,47 @@ function readGuestAnalysis() {
 function readGuestProgress() {
   const saved = localStorage.getItem(PROGRESS_STORAGE_KEY) || localStorage.getItem('face-aura-progress') || localStorage.getItem('aura-progress')
   try { return saved ? JSON.parse(saved) as ProgressEntry[] : seedProgress } catch { return seedProgress }
+}
+
+type CachedRoutine = {
+  completion: DailyRoutineCompletion
+  updatedAt: string
+}
+
+function emptyRoutine(): DailyRoutineCompletion {
+  return { morning: [], evening: [] }
+}
+
+function routineCacheKey(date: string, userId?: string) {
+  return `${userId ?? 'guest'}:${date}`
+}
+
+function readCachedRoutine(date: string, userId?: string): CachedRoutine {
+  try {
+    const store = JSON.parse(localStorage.getItem(ROUTINE_STORAGE_KEY) || '{}') as Record<string, CachedRoutine>
+    const cached = store[routineCacheKey(date, userId)]
+    if (!cached) return { completion: emptyRoutine(), updatedAt: '' }
+    return {
+      completion: {
+        morning: Array.isArray(cached.completion?.morning) ? cached.completion.morning.filter((step): step is string => typeof step === 'string') : [],
+        evening: Array.isArray(cached.completion?.evening) ? cached.completion.evening.filter((step): step is string => typeof step === 'string') : [],
+      },
+      updatedAt: typeof cached.updatedAt === 'string' ? cached.updatedAt : '',
+    }
+  } catch {
+    return { completion: emptyRoutine(), updatedAt: '' }
+  }
+}
+
+function saveCachedRoutine(date: string, completion: DailyRoutineCompletion, updatedAt: string, userId?: string) {
+  let store: Record<string, CachedRoutine> = {}
+  try { store = JSON.parse(localStorage.getItem(ROUTINE_STORAGE_KEY) || '{}') as Record<string, CachedRoutine> } catch { store = {} }
+  store[routineCacheKey(date, userId)] = { completion, updatedAt }
+  localStorage.setItem(ROUTINE_STORAGE_KEY, JSON.stringify(store))
+}
+
+function routineStepKey(step: RoutineStep) {
+  return `${step.order}:${step.name}`
 }
 
 function formatDateInput(date: Date) {
@@ -612,15 +654,114 @@ function ReminderPlanner({ analysis, onClose }: { analysis: SkinAnalysis; onClos
 }
 
 function Routine({ analysis }: { analysis: SkinAnalysis }) {
+  const { user } = useAuth()
+  const today = formatDateInput(new Date())
   const [mode, setMode] = useState<'morning' | 'evening'>('morning')
-  const [checked, setChecked] = useState<number[]>([])
+  const [completion, setCompletion] = useState<DailyRoutineCompletion>(() => readCachedRoutine(today, user?.id).completion)
+  const [hydrated, setHydrated] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('Loading today’s routine…')
+  const [syncError, setSyncError] = useState(false)
+  const saveVersion = useRef(0)
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
   const steps = mode === 'morning' ? analysis.morningRoutine : analysis.eveningRoutine
+  const checked = completion[mode]
+  const completeCount = completion.morning.length + completion.evening.length
+  const totalSteps = analysis.morningRoutine.length + analysis.eveningRoutine.length
+
+  useEffect(() => {
+    let active = true
+    const cached = readCachedRoutine(today, user?.id)
+    setHydrated(false)
+    setDirty(false)
+    setSyncError(false)
+    setSyncMessage(user ? 'Loading today’s routine…' : 'Today’s routine is saved on this device.')
+    if (!user) {
+      setCompletion(cached.completion)
+      setHydrated(true)
+      return () => { active = false }
+    }
+    loadDailyRoutine(user.id, today)
+      .then((cloud) => {
+        if (!active) return
+        const useCached = Boolean(cached.updatedAt) && (!cloud.updatedAt || cached.updatedAt > cloud.updatedAt)
+        const next = useCached ? cached.completion : cloud.completion
+        setCompletion(next)
+        setHydrated(true)
+        if (useCached) {
+          saveVersion.current += 1
+          setDirty(true)
+          setSyncMessage('Finishing today’s sync…')
+        } else {
+          if (cloud.updatedAt) saveCachedRoutine(today, next, cloud.updatedAt, user.id)
+          setSyncMessage('Today’s routine is synced to your account.')
+        }
+      })
+      .catch(() => {
+        if (!active) return
+        setCompletion(cached.completion)
+        setHydrated(true)
+        setSyncError(true)
+        setSyncMessage('Cloud sync is unavailable; today’s routine is safe on this device.')
+      })
+    return () => { active = false }
+  }, [today, user?.id])
+
+  useEffect(() => {
+    if (!user || !hydrated || !dirty) return
+    const version = saveVersion.current
+    const snapshot = completion
+    let active = true
+    const timer = window.setTimeout(() => {
+      setSyncError(false)
+      setSyncMessage('Saving today’s progress…')
+      const request = saveQueue.current.then(() => saveDailyRoutine(user.id, today, snapshot))
+      saveQueue.current = request.then(() => undefined, () => undefined)
+      void request
+        .then((updatedAt) => {
+          if (!active || saveVersion.current !== version) return
+          saveCachedRoutine(today, snapshot, updatedAt, user.id)
+          setDirty(false)
+          setSyncMessage('Today’s routine is synced to your account.')
+        })
+        .catch(() => {
+          if (!active || saveVersion.current !== version) return
+          setSyncError(true)
+          setSyncMessage('Cloud sync is unavailable; today’s routine is safe on this device.')
+        })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [completion, dirty, hydrated, today, user?.id])
+
+  const toggleStep = (step: RoutineStep) => {
+    const key = routineStepKey(step)
+    const updatedAt = new Date().toISOString()
+    saveVersion.current += 1
+    setCompletion((current) => {
+      const currentSteps = current[mode]
+      const nextSteps = currentSteps.includes(key) ? currentSteps.filter((item) => item !== key) : [...currentSteps, key]
+      const next = { ...current, [mode]: nextSteps }
+      saveCachedRoutine(today, next, updatedAt, user?.id)
+      return next
+    })
+    setSyncError(false)
+    if (user) {
+      setDirty(true)
+      setSyncMessage('Saving today’s progress…')
+    } else {
+      setSyncMessage('Today’s routine is saved on this device.')
+    }
+  }
+
   return (
     <section className="routine-page page-wrap">
-      <div className="page-heading-row"><div><span className="eyebrow">Your skin ritual</span><h1>Consistency, not complexity.</h1><p>A concise routine built around your latest skin snapshot.</p></div><div className="streak-card"><Sparkles size={21} /><div><strong>6 day streak</strong><span>You’re building a rhythm</span></div></div></div>
-      <div className="routine-tabs"><button className={mode === 'morning' ? 'active' : ''} onClick={() => { setMode('morning'); setChecked([]) }}><Sun size={18} /> Morning</button><button className={mode === 'evening' ? 'active' : ''} onClick={() => { setMode('evening'); setChecked([]) }}><Moon size={18} /> Evening</button></div>
+      <div className="page-heading-row"><div><span className="eyebrow">Your skin ritual</span><h1>Consistency, not complexity.</h1><p>A concise routine built around your latest skin snapshot.</p><span className={syncError ? 'sync-message sync-error' : 'sync-message'} aria-live="polite">{!hydrated ? <LoaderCircle className="spin" size={14} /> : syncError ? <CircleAlert size={14} /> : <ShieldCheck size={14} />} {syncMessage}</span></div><div className="streak-card"><Sparkles size={21} /><div><strong>{completeCount} of {totalSteps} today</strong><span>{completeCount === totalSteps ? 'Today’s ritual is complete' : 'Every small step counts'}</span></div></div></div>
+      <div className="routine-tabs"><button className={mode === 'morning' ? 'active' : ''} onClick={() => setMode('morning')}><Sun size={18} /> Morning</button><button className={mode === 'evening' ? 'active' : ''} onClick={() => setMode('evening')}><Moon size={18} /> Evening</button></div>
       <div className="routine-layout">
-        <div className="routine-list"><div className="routine-list-head"><div><span>{mode === 'morning' ? 'Start bright' : 'Reset & repair'}</span><h2>{mode === 'morning' ? 'Protect your barrier for the day.' : 'Give your skin a calm landing.'}</h2></div><span className="time-pill"><Clock3 size={15} /> About 4 min</span></div>{steps.map((step, index) => { const done = checked.includes(index); return <button className={done ? 'routine-step done' : 'routine-step'} key={step.name} onClick={() => setChecked((prev) => done ? prev.filter((n) => n !== index) : [...prev, index])}><span className="step-order">{done ? <Check size={18} /> : step.order}</span><div><span className="mini-label">{step.ingredient}</span><h3>{step.name}</h3><p>{step.instruction}</p></div><ChevronRight size={18} /></button>})}<div className="routine-progress"><span><strong>{checked.length}</strong> of {steps.length} complete</span><div className="meter"><span style={{ width: `${(checked.length / steps.length) * 100}%` }} /></div></div></div>
+        <div className="routine-list"><div className="routine-list-head"><div><span>{mode === 'morning' ? 'Start bright' : 'Reset & repair'}</span><h2>{mode === 'morning' ? 'Protect your barrier for the day.' : 'Give your skin a calm landing.'}</h2></div><span className="time-pill"><Clock3 size={15} /> About 4 min</span></div>{steps.map((step) => { const done = checked.includes(routineStepKey(step)); return <button className={done ? 'routine-step done' : 'routine-step'} key={routineStepKey(step)} disabled={!hydrated} aria-pressed={done} onClick={() => toggleStep(step)}><span className="step-order">{done ? <Check size={18} /> : step.order}</span><div><span className="mini-label">{step.ingredient}</span><h3>{step.name}</h3><p>{step.instruction}</p></div><ChevronRight size={18} /></button>})}<div className="routine-progress"><span><strong>{checked.length}</strong> of {steps.length} complete</span><div className="meter"><span style={{ width: `${steps.length ? (checked.length / steps.length) * 100 : 0}%` }} /></div></div></div>
         <aside className="product-panel"><span className="eyebrow">Ingredient-led picks</span><h2>What to look for</h2><p>Suggestions are category-based so you can choose a brand that fits your budget and values.</p>{analysis.products.map((product) => <article className="product-row" key={product.name}><span className="product-icon"><Droplets size={18} /></span><div><span>{product.category} · {product.priceBand}</span><strong>{product.name}</strong><p>{product.reason}</p></div></article>)}<div className="affiliate-note"><CircleAlert size={16} /> No sponsored ranking or affiliate links.</div></aside>
       </div>
     </section>

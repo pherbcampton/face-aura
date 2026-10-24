@@ -1,4 +1,4 @@
-import type { SkinAnalysis, ProgressEntry } from './types'
+import type { DailyRoutineCompletion, DailyRoutineRecord, SkinAnalysis, ProgressEntry } from './types'
 import { supabase } from './lib/supabase'
 
 export async function loadLatestAnalysis(userId: string): Promise<SkinAnalysis | null> {
@@ -50,6 +50,42 @@ export async function saveProgress(userId: string, entry: Omit<ProgressEntry, 'i
     date: new Date(`${data.checkin_date as string}T12:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
     ...entry,
   }
+}
+
+export async function loadDailyRoutine(userId: string, date: string): Promise<DailyRoutineRecord> {
+  if (!supabase) return { completion: { morning: [], evening: [] }, updatedAt: null }
+  const { data, error } = await supabase
+    .from('daily_routine_completions')
+    .select('morning_steps, evening_steps, updated_at')
+    .eq('user_id', userId)
+    .eq('completion_date', date)
+    .maybeSingle()
+  if (error) throw error
+  return {
+    completion: {
+      morning: (data?.morning_steps as string[] | undefined) ?? [],
+      evening: (data?.evening_steps as string[] | undefined) ?? [],
+    },
+    updatedAt: (data?.updated_at as string | undefined) ?? null,
+  }
+}
+
+export async function saveDailyRoutine(userId: string, date: string, completion: DailyRoutineCompletion): Promise<string> {
+  if (!supabase) throw new Error('Cloud data is not configured.')
+  const updatedAt = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('daily_routine_completions')
+    .upsert({
+      user_id: userId,
+      completion_date: date,
+      morning_steps: completion.morning,
+      evening_steps: completion.evening,
+      updated_at: updatedAt,
+    }, { onConflict: 'user_id,completion_date' })
+    .select('updated_at')
+    .single()
+  if (error) throw error
+  return data.updated_at as string
 }
 
 export type BookingInput = {
