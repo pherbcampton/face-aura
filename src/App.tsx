@@ -262,7 +262,21 @@ function Header({ page, setPage, mobileNav, setMobileNav }: { page: Page; setPag
   const [authOpen, setAuthOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [modelLabel, setModelLabel] = useState('Gemma 4')
   const initials = displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/health')
+      .then((response) => response.ok ? response.json() as Promise<{ provider?: string }> : Promise.reject(new Error('Health check failed')))
+      .then(({ provider }) => {
+        if (!active) return
+        if (provider === 'ollama-cloud') setModelLabel('Gemma 4 cloud')
+        else if (provider === 'ollama-local') setModelLabel('Gemma 4 local')
+      })
+      .catch(() => { /* Keep the neutral label when status is unavailable. */ })
+    return () => { active = false }
+  }, [])
 
   const beginGoogleSignIn = async () => {
     setAuthError('')
@@ -284,7 +298,7 @@ function Header({ page, setPage, mobileNav, setMobileNav }: { page: Page; setPag
         ))}
       </nav>
       <div className="header-actions">
-        <span className="model-chip"><span className="status-dot" /> Gemma 4 local</span>
+        <span className="model-chip" aria-live="polite"><span className="status-dot" /> {modelLabel}</span>
         {loading ? <LoaderCircle className="spin auth-loader" size={19} /> : user ? <div className="profile-menu-wrap">
           <button className="avatar-button" onClick={() => setProfileOpen(!profileOpen)} aria-label="Open profile">{avatarUrl ? <img src={avatarUrl} alt="" referrerPolicy="no-referrer" /> : initials}</button>
           {profileOpen && <div className="profile-menu">
