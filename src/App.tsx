@@ -61,6 +61,13 @@ const navItems: { page: Page; label: string }[] = [
   { page: 'experts', label: 'Experts' },
 ]
 
+const pages: Page[] = ['home', 'scan', 'results', 'routine', 'progress', 'experts']
+
+function readPageFromHash(): Page {
+  const hash = window.location.hash.slice(1).toLowerCase()
+  return pages.includes(hash as Page) ? hash as Page : 'home'
+}
+
 const demoAnalysis: SkinAnalysis = {
   summary: 'Your skin appears balanced overall, with a little dehydration around the cheeks and some visible congestion through the T-zone.',
   skinType: 'Combination · dehydration-prone',
@@ -204,7 +211,7 @@ async function prepareAnalysisImage(blob: Blob) {
 
 function App() {
   const { user } = useAuth()
-  const [page, setPage] = useState<Page>('home')
+  const [page, setPage] = useState<Page>(readPageFromHash)
   const [analysis, setAnalysis] = useState<SkinAnalysis>(() => readGuestAnalysis() ?? demoAnalysis)
   const [hasPersonalScan, setHasPersonalScan] = useState(() => Boolean(readGuestAnalysis()))
   const [syncMessage, setSyncMessage] = useState('')
@@ -213,8 +220,22 @@ function App() {
   const [voiceIntent, setVoiceIntent] = useState<VoiceIntent>('conversation')
 
   useEffect(() => {
+    const nextHash = `#${page}`
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${window.location.search}${nextHash}`,
+      )
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [page])
+
+  useEffect(() => {
+    const syncPageWithHash = () => setPage(readPageFromHash())
+    window.addEventListener('hashchange', syncPageWithHash)
+    return () => window.removeEventListener('hashchange', syncPageWithHash)
+  }, [])
 
   useEffect(() => {
     if (!user) {
